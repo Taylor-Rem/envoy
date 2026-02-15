@@ -9,15 +9,16 @@ use config::Config;
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load config
-    let mut config = Config::load()?;
-    
+    let mut config = match Config::load() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to load config: {}", e);
+            return Err(e);
+        }
+    };
+
     // Parse args
     let args: Vec<String> = std::env::args().collect();
-    
-    if args.len() < 2 {
-        print_usage();
-        return Ok(());
-    }
 
     // Create API client
     let client = ApiClient::new(config.server_url.clone());
@@ -27,15 +28,25 @@ async fn main() -> Result<()> {
         Some(id) => id,
         None => {
             println!("Registering device '{}'...", config.device_name);
-            let id = client.register_device(config.device_name.clone()).await?;
-            config.set_device_id(id)?;
-            println!("Device registered with ID: {}\n", id);
-            id
+            match client.register_device(config.device_name.clone()).await {
+                Ok(id) => {
+                    config.set_device_id(id)?;
+                    println!("Device registered with ID: {}\n", id);
+                    id
+                }
+                Err(e) => {
+                    eprintln!("Failed to connect to Artificer at {}: {}", config.server_url, e);
+                    eprintln!("Is the Artificer server running?");
+                    return Err(e);
+                }
+            }
         }
     };
 
-    // Handle commands
-    match args[1].as_str() {
+    // Handle commands — default to chat if no args
+    let command = args.get(1).map(|s| s.as_str()).unwrap_or("chat");
+
+    match command {
         "chat" => {
             ui::interactive_chat(client, device_id).await?;
         }
